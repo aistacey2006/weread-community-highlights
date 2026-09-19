@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WeRead Popular Highlights
 // @namespace    s-weread
-// @version      0.7.0
+// @version      0.7.1
 // @license      MIT
 // @description  Show popular WeRead highlights in the desktop web reader.
 // @match        https://weread.qq.com/web/reader/*
@@ -188,17 +188,14 @@ function readerBridgeBootstrap() {
     }
     throw new Error('reader 尚未完成目标分段排版，请再点击一次');
   }
-    let paintedReader, paintedHtml = '';
   function clearPage() {
-    if (paintedReader && paintedReader.chapterContentHighLightBgHtml === paintedHtml) paintedReader.chapterContentHighLightBgHtml = '';
-    paintedReader = null;
-    paintedHtml = '';
+    document.getElementById('wrph-page-marks')?.replaceChildren();
   }
   function viewport() {
     const r = reader(), context = identity();
     if (!r || !context) return null;
     const content = r.$refs?.renderTargetContent;
-    if (!content?.isConnected || typeof r.findObjsWithPoints !== 'function' || typeof r.clientXY2RenderAreaXY !== 'function' || typeof r.highLightObjs !== 'function') return null;
+    if (!content?.isConnected || typeof r.findObjsWithPoints !== 'function' || typeof r.clientXY2RenderAreaXY !== 'function') return null;
     const origin = content.getBoundingClientRect();
     const top = Math.max(0, r.$refs?.reader_top_bar?.$el?.getBoundingClientRect().bottom || 72);
     const bottom = window.innerHeight - 20;
@@ -222,7 +219,6 @@ function readerBridgeBootstrap() {
     if (!v || !sameChapter(context) || v.signature !== signature) return null;
     clearPage();
     const characters = chapterCharacters();
-    const highlightFragments = [];
     const marks = [];
     for (const item of items) {
       const range = parseRange(item.range);
@@ -233,16 +229,7 @@ function readerBridgeBootstrap() {
       if (!rects.length) continue;
       const text = rangeText(characters, range.start, range.end);
       if (!text.trim()) continue;
-      // Ask the official renderer to draw each range separately: combining
-      // unrelated objects would fill the gaps between ranges on the same line.
-      v.r.highLightObjs(objects);
-      highlightFragments.push(v.r.chapterContentHighLightBgHtml);
       marks.push({...item, markText:text, target:{...range,...context,text,method:'native'}, rects});
-    }
-    if (highlightFragments.length) {
-      v.r.chapterContentHighLightBgHtml = highlightFragments.join('');
-      paintedReader = v.r;
-      paintedHtml = v.r.chapterContentHighLightBgHtml;
     }
     return {marks, left:v.origin.left, right:v.origin.right, top:v.top, bottom:v.bottom, signature};
   }
@@ -389,9 +376,8 @@ function readerBridgeBootstrap() {
     style.textContent = `
       #wrph-page-marks { position:fixed; inset:0; z-index:100; pointer-events:none; }
       #wrph-page-marks button { position:fixed; pointer-events:auto; cursor:pointer; }
-      #wrph-page-marks .wrph-page-label { background:#edf4ff; color:#346a9d; border:1px solid #c9dcf0; border-radius:5px; padding:4px 6px; font:11px/16px -apple-system,sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      #wrph-page-marks .wrph-page-hit { background:transparent; border:0; border-bottom:1px dotted #75a5c8; padding:0; }
-      #wrph-page-marks .wrph-page-hit:hover { background:#7cafff22; }
+      #wrph-page-marks .wrph-page-hit { background:transparent; border:0; border-bottom:1px dotted rgba(110,125,140,.48); border-radius:0; padding:0; box-sizing:border-box; }
+      #wrph-page-marks .wrph-page-hit:hover { background:rgba(125,145,165,.06); border-bottom-color:rgba(90,110,130,.85); }
 
       ::highlight(${HIGHLIGHT_NAME}) {
         background: rgba(218, 190, 88, .22);
@@ -452,7 +438,10 @@ function readerBridgeBootstrap() {
         border-bottom: 1px solid rgba(0,0,0,.07);
       }
 
+      #${PANEL_ID} .wr-close { position:absolute; top:7px; right:8px; width:30px; height:30px; border:0; border-radius:6px; background:transparent; color:#666; cursor:pointer; font-size:24px; line-height:28px; }
+      #${PANEL_ID} .wr-close:hover { background:rgba(0,0,0,.06); }
       #${PANEL_ID} .wr-title {
+        padding-right:30px;
         font-size: 13px;
         font-weight: 650;
         margin-bottom: 5px;
@@ -547,7 +536,8 @@ function readerBridgeBootstrap() {
     panel.innerHTML = `
       <div class="wr-box">
         <div class="wr-head">
-          <div class="wr-title">WeRead Popular Highlights · v0.7</div>
+          <button class="wr-close" type="button" aria-label="关闭想法面板" title="关闭">×</button>
+          <div class="wr-title">WeRead Popular Highlights · v0.7.1</div>
           <div class="wr-status">脚本已启动。</div>
 
           <div class="wr-actions">
@@ -559,10 +549,18 @@ function readerBridgeBootstrap() {
         <div class="wr-list"></div>
       </div>
 
-      <button class="wr-main-btn">WR 0.7</button>
+      <button class="wr-main-btn">WR 0.7.1</button>
     `;
 
     document.body.appendChild(panel);
+    const closePanel = () => panel.classList.remove('open');
+    panel.querySelector('.wr-close').addEventListener('click', closePanel);
+    document.addEventListener('click', event => {
+      if (!panel.contains(event.target)) closePanel();
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') closePanel();
+    });
 
     panel
       .querySelector('.wr-main-btn')
@@ -651,7 +649,7 @@ function readerBridgeBootstrap() {
     }
     return reviewRequests.get(key);
   }
-  async function openReviews(item, context, label) {
+  async function openReviews(item, context) {
     const panel = ensurePanel();
     const list = panel.querySelector('.wr-list');
     list.replaceChildren();
@@ -681,15 +679,13 @@ function readerBridgeBootstrap() {
       const total = Number(group.totalCount).toLocaleString();
       renderReviews(body,group);
       setStatus(`${countLabel(item)} · ${total} 条想法 · 首屏最多 5 条`);
-      if (label.isConnected) label.textContent = `${countLabel(item)} · ${total} 条想法`;
     } catch(error) {
       if (!body.isConnected) return;
-      body.textContent = `${error.message || '想法加载失败'}；点击正文旁标签可重试。`;
+      body.textContent = `${error.message || '想法加载失败'}；再次点击正文划线可重试。`;
     }
   }
   function clearView() {
     readerBridge.clearPage();
-    document.getElementById('wrph-page-marks')?.replaceChildren();
     const panel = ensurePanel();
     panel.classList.remove('open');
     panel.querySelector('.wr-list').replaceChildren();
@@ -698,28 +694,15 @@ function readerBridgeBootstrap() {
     let root = document.getElementById('wrph-page-marks');
     if (!root) { root=document.createElement('div');root.id='wrph-page-marks';document.body.appendChild(root); }
     root.replaceChildren();
-    // Labels stay in the margin; transparent hit areas use official text rects.
-    const width = Math.min(175, Math.max(120, window.innerWidth-page.right-20));
-    const left = Math.min(window.innerWidth-width-8, page.right+8);
-    let nextY = page.top;
+    // Preserve the full text rectangles as hit areas; only their bottom edge is visible.
     for (const item of page.marks.sort((a,b) => a.rects[0].y-b.rects[0].y || a.target.start-b.target.start)) {
-      const label=document.createElement('button');
-      label.className='wrph-page-label';
-      label.dataset.range=item.range;
-      label.textContent=countLabel(item)+' · 查看想法';
-      label.title=item.markText;
-      const y=Math.max(page.top, Math.min(page.bottom-24, item.rects[0].y), nextY);
-      nextY=y+27;
-      label.style.cssText=`left:${left}px;top:${y}px;max-width:${width}px`;
-      label.addEventListener('click',event=>{event.stopPropagation();openReviews(item,context,label);});
-      root.appendChild(label);
       for (const rect of item.rects) {
         const hit=document.createElement('button');
         hit.className='wrph-page-hit';
         hit.title=item.markText+' · 查看想法';
         hit.setAttribute('aria-label',item.markText+' · 查看想法');
         hit.style.cssText=`left:${rect.x}px;top:${Math.max(page.top,rect.y)}px;width:${rect.w}px;height:${Math.max(0,Math.min(rect.y+rect.h,page.bottom)-Math.max(page.top,rect.y))}px`;
-        hit.addEventListener('click',event=>{event.stopPropagation();openReviews(item,context,label);});
+        hit.addEventListener('click',event=>{event.stopPropagation();openReviews(item,context);});
         root.appendChild(hit);
       }
     }
