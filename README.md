@@ -12,9 +12,9 @@
 - 点击展开面板中的原文，使用微信读书 reader 的官方 range 定位并高亮正文。
 - 动态识别当前书籍、章节和划线范围，没有绑定特定书籍。
 
-## 截图
+## Screenshot
 
-> 待补充：当前页热门划线、人数标签、展开读者想法的功能截图。
+![WeRead Popular Highlights screenshot](docs/screenshot.png)
 
 ## 安装
 
